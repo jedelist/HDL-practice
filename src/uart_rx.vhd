@@ -17,13 +17,13 @@ entity uart_rx is
 
         busy : out std_logic := '0';
         corrupt : out std_logic := '0';
-        pkt_valid : out std_logic := '0';
+        pkt_valid : out std_logic := '0'
 
     );
 end entity uart_rx;
 
 architecture rtl of uart_rx is
-    type rx_state_t is (IDLE, DATA, STOP);
+    type rx_state_t is (IDLE, START, DATA, STOP);
     signal state : rx_state_t := IDLE;
 
     signal clk_cnt : natural range 0 to CLKS_PER_BIT - 1 := 0;
@@ -36,49 +36,78 @@ begin
             pkt <= (others => '0');
             busy <= '0';
             state <= IDLE;
-            bit_ptr <= '0';
+            bit_ptr <= 0;
             corrupt <= '0';
             clk_cnt <= 0;
             pkt_valid <= '0';
+            byte <= (others => '0');
         elsif (rising_edge(clk)) then
-            if (clk_cnt = CLKS_PER_BIT - 1) then
-                clk_cnt <= 0;
-                if (state = IDLE and rx_serial = '0') then
-                    state <= DATA;
-                    busy <= '1';
-                    bit_ptr <= 0;
-                    byte <= (others => '0');
-                elsif (state = IDLE) then
-                    busy <= '0';
-                    corrupt <= '0';
-                    byte <= (others => '0');
-                end if;
-                if (state = DATA and bit_ptr < 7) then
-                    byte(bit_ptr) <= rx_serial;
-                    bit_ptr <= bit_ptr + 1;
-                end if;
-                if (state = DATA and bit_ptr = 7) then
-                    byte(bit_ptr) <= rx_serial;
-                    state <= STOP;
-                end if;
-                if (state = STOP) then
-                    if (rx_serial = '1') then       -- Correct format case
-                        state <= IDLE;
-                        pkt <= byte;
-                        pkt_valid <= '1';
-                        bit_ptr <= 0;
-                        corrupt <= '0';
-                        busy <= '0';
-                        byte <= (others => '0');
-                    else                            -- Edge case handle differently depending on spec.
-                        corrupt <= '1';
+            pkt_valid <= '0';                               -- pkt_valid remains low and pulses high in STOP
+            case state is 
+                when IDLE => 
+                    if (rx_serial = '0') then
+                        -- Detected potential START bit
                         busy <= '1';
+                        state <= START;
+                        bit_ptr <= 0;
+                        clk_cnt <= 0;
+                    else
+                        busy <= '0';
                         pkt_valid <= '0';
+                        corrupt <= '0';
                     end if;
-                end if;
-            else
-                clk_cnt <= clk_cnt + 1;
-            end if;
+                when START =>
+                    if (clk_cnt = CLKS_PER_BIT / 2) then     -- Sample in the middle of bit
+                        if (rx_serial = '0') then
+                            state <= DATA;
+                            clk_cnt <= 0;
+                            busy <= '1';
+                            bit_ptr <= 0;
+                        else
+                            state <= IDLE;                   -- Fall back to IDLE if not true START but
+                            busy <= '0';
+                            clk_cnt <= 0;
+                        end if;
+                    else
+                        clk_cnt <= clk_cnt + 1;
+                    end if;
+                when DATA =>
+                    if (clk_cnt = CLKS_PER_BIT - 1) then
+                        byte(bit_ptr) <= rx_serial;
+                        clk_cnt <= 0;
+                        if (bit_ptr = 7) then
+                            state <= STOP;
+                            bit_ptr <= 0;
+                        else
+                            bit_ptr <= bit_ptr + 1;
+                        end if;
+                    else
+                        clk_cnt <= clk_cnt + 1;
+                    end if;
+                when STOP =>
+                    if (clk_cnt = CLKS_PER_BIT - 1) then
+                        if (rx_serial = '1') then
+                            pkt <= byte;
+                            byte <= (others => '0');
+                            pkt_valid <= '1';
+                            state <= IDLE;
+                            bit_ptr <= 0;
+                            clk_cnt <= 0;
+                            busy <= '0';
+                        else
+                            corrupt <= '1';
+                            -- handle somehow according to spec:
+                            state <= IDLE;
+                            byte <= (others => '0');
+                            busy <= '0';
+                            clk_cnt <= 0;
+                            bit_ptr <= 0;
+                            
+                        end if;
+                    else 
+                        clk_cnt <= clk_cnt + 1;
+                    end if;
+            end case;
         end if;
     end process uart_rx;
 end architecture rtl;
