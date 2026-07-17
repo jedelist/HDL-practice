@@ -39,12 +39,10 @@ begin
             -- Reset to 1 since rx_serial is active low
             rx_meta <= '1';
             rx_sync <= '1';
-        else
-            if (rising_edge clk) then
-                -- 2-flop synchronizer to sample stable version of rx_serial
-                rx_meta <= rx_serial;
-                rx_sync <= rx_meta;
-            end if;
+        elsif(rising_edge(clk)) then
+            -- 2-flop synchronizer to sample stable version of rx_serial
+            rx_meta <= rx_serial;
+            rx_sync <= rx_meta;
         end if;
     end process rx_synchronizer;
 
